@@ -53,6 +53,50 @@ describe("getNormalizedContainerOptions", () => {
 		expect(result).toEqual([]);
 	});
 
+	it("should exclude container instance groups from application normalization", async ({
+		expect,
+	}) => {
+		const config = {
+			name: "test-worker",
+			configPath: "/test/wrangler.jsonc",
+			userConfigPath: "/test/wrangler.jsonc",
+			topLevelName: "test-worker",
+			containers: [
+				{
+					type: "instance",
+					class_name: "InstanceContainer",
+					name: "instance-containers",
+				},
+				{
+					class_name: "ApplicationContainer",
+					image: "registry.cloudflare.com/test:latest",
+					name: "application-containers",
+				},
+			],
+			durable_objects: {
+				bindings: [
+					{
+						name: "INSTANCE_CONTAINER",
+						class_name: "InstanceContainer",
+					},
+					{
+						name: "APPLICATION_CONTAINER",
+						class_name: "ApplicationContainer",
+					},
+				],
+			},
+		} as Partial<Config> as Config;
+
+		const result = await getNormalizedContainerOptions(config, {
+			dryRun: true,
+		});
+		expect(result).toHaveLength(1);
+		expect(result[0]).toMatchObject({
+			class_name: "ApplicationContainer",
+			name: "application-containers",
+		});
+	});
+
 	it("should throw error when container class_name doesn't match any durable object", async ({
 		expect,
 	}) => {

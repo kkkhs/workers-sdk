@@ -324,9 +324,11 @@ export async function apply(
 		"deploy changes to your application"
 	);
 
-	config.containers ??= [];
-
-	if (config.containers.length === 0) {
+	const containerApps =
+		config.containers?.filter(
+			(container): container is ContainerApp => container.type === undefined
+		) ?? [];
+	if (containerApps.length === 0) {
 		endSection(
 			"You don't have any container applications defined in your wrangler.toml",
 			"You can set the following configuration in your wrangler.toml"
@@ -374,7 +376,7 @@ export async function apply(
 
 	log(dim("Container application changes\n"));
 
-	for (const appConfigNoDefaults of config.containers) {
+	for (const appConfigNoDefaults of containerApps) {
 		// eslint-disable-next-line @typescript-eslint/no-deprecated -- kept for backward compatibility, populates deprecated `configuration` for API compatibility
 		appConfigNoDefaults.configuration ??= {};
 		// eslint-disable-next-line @typescript-eslint/no-deprecated -- kept for backward compatibility, populates deprecated `configuration` for API compatibility

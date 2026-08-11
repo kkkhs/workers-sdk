@@ -52,7 +52,7 @@ describe("wrangler deploy with containers", () => {
 		setupCommonMocks();
 		fs.writeFileSync(
 			"index.js",
-			`export class ExampleDurableObject {}; export default{};`
+			`export class ExampleDurableObject {}; export class SandboxDurableObject {}; export default{};`
 		);
 		vi.stubEnv("WRANGLER_DOCKER_BIN", "/usr/bin/docker");
 	});
@@ -110,6 +110,178 @@ describe("wrangler deploy with containers", () => {
 			Image appears to belong to account: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 			Current account: "some-account-id"]
 		`);
+	});
+	it("should deploy a namespace-backed container instance group without creating an application", async ({
+		expect,
+	}) => {
+		const namespaceId = "14758f1afd44c09b7992073ccf00b43d";
+		mockGetVersion("Galaxy-Class", [
+			{
+				...defaultDOBinding,
+				namespace_id: namespaceId,
+			},
+		]);
+		writeWranglerConfig({
+			...DEFAULT_DURABLE_OBJECTS,
+			containers: [
+				{
+					type: "instance",
+					name: "sandboxes",
+					class_name: "ExampleDurableObject",
+					constraints: {
+						jurisdiction: "eu",
+						regions: ["WEUR"],
+					},
+					ssh: {
+						enabled: true,
+						authorized_keys: [],
+					},
+				},
+			],
+		});
+
+		let applicationRequests = 0;
+		let instanceGroupRequests = 0;
+		msw.use(
+			http.get("*/applications", () => {
+				applicationRequests++;
+				return HttpResponse.json({ success: true, result: [] });
+			}),
+			http.put(
+				"*/instance-groups/:namespaceId",
+				async ({ params, request }) => {
+					instanceGroupRequests++;
+					expect(params.namespaceId).toBe(namespaceId);
+					expect(await request.json()).toEqual({
+						class_name: "ExampleDurableObject",
+						name: "sandboxes",
+						constraints: {
+							jurisdiction: "eu",
+							regions: ["WEUR"],
+						},
+						ssh: {
+							enabled: true,
+							authorized_keys: [],
+						},
+					});
+					return HttpResponse.json({
+						success: true,
+						result: {
+							namespace_id: namespaceId,
+							class_name: "ExampleDurableObject",
+							name: "sandboxes",
+							generation: 1,
+						},
+					});
+				}
+			)
+		);
+
+		await runWrangler("deploy index.js");
+
+		expect(instanceGroupRequests).toBe(1);
+		expect(applicationRequests).toBe(0);
+		expect(spawn).not.toHaveBeenCalled();
+	});
+	it("should deploy application and instance entries through separate paths", async ({
+		expect,
+	}) => {
+		const applicationNamespaceId = "11111111111111111111111111111111";
+		const instanceNamespaceId = "22222222222222222222222222222222";
+		const instanceClassName = "SandboxDurableObject";
+		writeWranglerConfig({
+			durable_objects: {
+				bindings: [
+					{
+						name: "EXAMPLE_DO_BINDING",
+						class_name: "ExampleDurableObject",
+					},
+					{
+						name: "SANDBOX_DO_BINDING",
+						class_name: instanceClassName,
+					},
+				],
+			},
+			migrations: [
+				{
+					tag: "v1",
+					new_sqlite_classes: ["ExampleDurableObject", instanceClassName],
+				},
+			],
+			containers: [
+				DEFAULT_CONTAINER_FROM_REGISTRY,
+				{
+					type: "instance",
+					name: "sandboxes",
+					class_name: instanceClassName,
+				},
+			],
+		});
+		mockUploadWorkerRequest({
+			expectedBindings: [
+				{
+					class_name: "ExampleDurableObject",
+					name: "EXAMPLE_DO_BINDING",
+					type: "durable_object_namespace",
+				},
+				{
+					class_name: instanceClassName,
+					name: "SANDBOX_DO_BINDING",
+					type: "durable_object_namespace",
+				},
+			],
+			useOldUploadApi: true,
+			expectedContainers: [
+				{ class_name: "ExampleDurableObject" },
+				{ class_name: instanceClassName },
+			],
+		});
+		mockGetVersion("Galaxy-Class", [
+			{
+				...defaultDOBinding,
+				namespace_id: applicationNamespaceId,
+			},
+			{
+				type: "durable_object_namespace",
+				namespace_id: instanceNamespaceId,
+				class_name: instanceClassName,
+			},
+		]);
+		mockGetApplications([]);
+		mockCreateApplication(expect, {
+			name: "my-container",
+			durable_objects: {
+				namespace_id: applicationNamespaceId,
+			},
+		});
+
+		let instanceGroupRequests = 0;
+		msw.use(
+			http.put(
+				"*/instance-groups/:namespaceId",
+				async ({ params, request }) => {
+					instanceGroupRequests++;
+					expect(params.namespaceId).toBe(instanceNamespaceId);
+					expect(await request.json()).toEqual({
+						class_name: instanceClassName,
+						name: "sandboxes",
+					});
+					return HttpResponse.json({
+						success: true,
+						result: {
+							namespace_id: instanceNamespaceId,
+							class_name: instanceClassName,
+							name: "sandboxes",
+							generation: 1,
+						},
+					});
+				}
+			)
+		);
+
+		await runWrangler("deploy index.js");
+
+		expect(instanceGroupRequests).toBe(1);
 	});
 	it("should be able to deploy a new container from a dockerfile", async ({
 		expect,

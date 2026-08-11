@@ -3366,6 +3366,164 @@ const validateBindingArray =
 		return isValid;
 	};
 
+const CONTAINER_REGIONS = [
+	"ENAM",
+	"WNAM",
+	"EEUR",
+	"WEUR",
+	"APAC",
+	"SAM",
+	"ME",
+	"OC",
+	"AFR",
+];
+
+function validateContainerInstanceGroup(
+	diagnostics: Diagnostics,
+	field: string,
+	index: number,
+	value: Record<string, unknown>
+): void {
+	const fieldPath = `${field}[${index}]`;
+	const allowedFields = new Set([
+		"type",
+		"class_name",
+		"name",
+		"constraints",
+		"ssh",
+	]);
+	const unsupportedFields = Object.keys(value).filter(
+		(key) => !allowedFields.has(key)
+	);
+	if (unsupportedFields.length > 0) {
+		diagnostics.errors.push(
+			`${fieldPath} has fields that are not supported for type "instance": ${unsupportedFields
+				.map((key) => `"${key}"`)
+				.join(", ")}`
+		);
+	}
+
+	if (value.constraints !== undefined) {
+		if (
+			typeof value.constraints !== "object" ||
+			value.constraints === null ||
+			Array.isArray(value.constraints)
+		) {
+			diagnostics.errors.push(`${fieldPath}.constraints must be an object`);
+		} else {
+			const constraints = value.constraints as Record<string, unknown>;
+			const unsupportedConstraints = Object.keys(constraints).filter(
+				(key) => key !== "jurisdiction" && key !== "regions"
+			);
+			if (unsupportedConstraints.length > 0) {
+				diagnostics.errors.push(
+					`${fieldPath}.constraints has unsupported fields: ${unsupportedConstraints
+						.map((key) => `"${key}"`)
+						.join(", ")}`
+				);
+			}
+
+			if (
+				constraints.jurisdiction !== undefined &&
+				(typeof constraints.jurisdiction !== "string" ||
+					!["eu", "fedramp"].includes(constraints.jurisdiction))
+			) {
+				diagnostics.errors.push(
+					`${fieldPath}.constraints.jurisdiction must be one of: "eu", "fedramp"`
+				);
+			}
+
+			if (constraints.regions !== undefined) {
+				if (
+					!Array.isArray(constraints.regions) ||
+					constraints.regions.some((region) => typeof region !== "string")
+				) {
+					diagnostics.errors.push(
+						`${fieldPath}.constraints.regions must be an array of strings`
+					);
+				} else {
+					for (const region of constraints.regions) {
+						if (!CONTAINER_REGIONS.includes(region.toUpperCase())) {
+							diagnostics.errors.push(
+								`${fieldPath}.constraints.regions contains invalid region "${region}". Valid regions are: ${CONTAINER_REGIONS.join(", ")}`
+							);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (value.ssh !== undefined) {
+		if (
+			typeof value.ssh !== "object" ||
+			value.ssh === null ||
+			Array.isArray(value.ssh)
+		) {
+			diagnostics.errors.push(`${fieldPath}.ssh must be an object`);
+		} else {
+			const ssh = value.ssh as Record<string, unknown>;
+			const unsupportedSSHFields = Object.keys(ssh).filter(
+				(key) => key !== "enabled" && key !== "authorized_keys"
+			);
+			if (unsupportedSSHFields.length > 0) {
+				diagnostics.errors.push(
+					`${fieldPath}.ssh has unsupported fields: ${unsupportedSSHFields
+						.map((key) => `"${key}"`)
+						.join(", ")}`
+				);
+			}
+
+			if (ssh.enabled !== undefined && typeof ssh.enabled !== "boolean") {
+				diagnostics.errors.push(`${fieldPath}.ssh.enabled must be a boolean`);
+			}
+
+			if (ssh.authorized_keys !== undefined) {
+				if (!Array.isArray(ssh.authorized_keys)) {
+					diagnostics.errors.push(
+						`${fieldPath}.ssh.authorized_keys must be an array`
+					);
+				} else {
+					for (const [keyIndex, key] of ssh.authorized_keys.entries()) {
+						const keyPath = `${fieldPath}.ssh.authorized_keys[${keyIndex}]`;
+						if (typeof key !== "object" || key === null || Array.isArray(key)) {
+							diagnostics.errors.push(`${keyPath} must be an object`);
+							continue;
+						}
+
+						const keyObject = key as Record<string, unknown>;
+						const unsupportedKeyFields = Object.keys(keyObject).filter(
+							(property) => property !== "name" && property !== "public_key"
+						);
+						if (unsupportedKeyFields.length > 0) {
+							diagnostics.errors.push(
+								`${keyPath} has unsupported fields: ${unsupportedKeyFields
+									.map((property) => `"${property}"`)
+									.join(", ")}`
+							);
+						}
+						if (
+							keyObject.name !== undefined &&
+							typeof keyObject.name !== "string"
+						) {
+							diagnostics.errors.push(`${keyPath}.name must be a string`);
+						}
+						if (typeof keyObject.public_key !== "string") {
+							diagnostics.errors.push(`${keyPath}.public_key must be a string`);
+						} else if (
+							!keyObject.public_key.toLowerCase().startsWith("ssh-ed25519")
+						) {
+							diagnostics.errors.push(
+								`${keyPath}.public_key is a unsupported key type. Please provide a ED25519 public key.`
+							);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
 function validateContainerApp(
 	envName: string,
 	topLevelName: string | undefined,
@@ -3383,12 +3541,17 @@ function validateContainerApp(
 			return false;
 		}
 
-		for (const containerAppOptional of value) {
-			// validate that either a name is set and is a string
-			if (!isOptionalProperty(value, "name", "string")) {
+		const classKinds = new Map<string, "application" | "instance">();
+		for (const [containerIndex, containerAppOptional] of value.entries()) {
+			if (
+				typeof containerAppOptional !== "object" ||
+				containerAppOptional === null ||
+				Array.isArray(containerAppOptional)
+			) {
 				diagnostics.errors.push(
-					`Field "name", when present, should be a string, but got ${JSON.stringify(value)}`
+					`${field}[${containerIndex}] must be an object, but got ${JSON.stringify(containerAppOptional)}`
 				);
+				continue;
 			}
 
 			validateRequiredProperty(
@@ -3405,26 +3568,61 @@ function validateContainerApp(
 				containerAppOptional.name,
 				"string"
 			);
+			if (typeof containerAppOptional.class_name === "string") {
+				const kind =
+					containerAppOptional.type === "instance" ? "instance" : "application";
+				const existingKind = classKinds.get(containerAppOptional.class_name);
+				if (
+					existingKind !== undefined &&
+					(existingKind === "instance" || kind === "instance")
+				) {
+					diagnostics.errors.push(
+						`"${field}.class_name" must be unique; "${containerAppOptional.class_name}" is configured more than once.`
+					);
+				}
+				if (existingKind === undefined || kind === "instance") {
+					classKinds.set(containerAppOptional.class_name, kind);
+				}
+			}
+
 			// try and add a default name
 			if (!containerAppOptional.name) {
 				// we need topLevelName and a containers.class_name if containers.name is not defined
 				if (
 					!topLevelName ||
-					!isOptionalProperty(containerAppOptional, "class_name", "string")
+					typeof containerAppOptional.class_name !== "string"
 				) {
 					diagnostics.errors.push(
 						`Must have either a top level "name" and "containers.class_name" field defined, or have field "containers.name" defined.`
 					);
+				} else {
+					// if there is worker name defined but no name for this container app default to:
+					// worker_name-class_name[-envName].
+					let name = `${topLevelName}-${containerAppOptional.class_name}`;
+					// config is undefined when we are at the top level instead of in a named env
+					// If we are in a named env, append it to the generated name
+					// so that users can re-use container definitions between different envs without issue.
+					name += config === undefined ? "" : `-${envName}`;
+					containerAppOptional.name = name.toLowerCase().replace(/ /g, "-");
 				}
-				// if there is worker name defined but no name for this container app default to:
-				// worker_name-class_name[-envName].
-				let name = `${topLevelName}-${containerAppOptional.class_name}`;
-				// config is undefined when we are at the top level instead of in a named env
-				// If we are in a named env, append it to the generated name
-				// so that users can re-use container definitions between different envs without issue.
-				name += config === undefined ? "" : `-${envName}`;
-				containerAppOptional.name = name.toLowerCase().replace(/ /g, "-");
 			}
+
+			if (containerAppOptional.type !== undefined) {
+				if (containerAppOptional.type !== "instance") {
+					diagnostics.errors.push(
+						`Unsupported containers[].type: ${JSON.stringify(containerAppOptional.type)}. Only "instance" is supported when "type" is set.`
+					);
+				} else {
+					validateContainerInstanceGroup(
+						diagnostics,
+						field,
+						containerIndex,
+						containerAppOptional
+					);
+				}
+				continue;
+			}
+
 			if (
 				!containerAppOptional.configuration?.image &&
 				!containerAppOptional.image
@@ -3830,24 +4028,13 @@ function validateContainerApp(
 					constraints.regions &&
 					Array.isArray(constraints.regions)
 				) {
-					const validRegions = [
-						"ENAM",
-						"WNAM",
-						"EEUR",
-						"WEUR",
-						"APAC",
-						"SAM",
-						"ME",
-						"OC",
-						"AFR",
-					];
 					for (const region of constraints.regions) {
 						if (
 							typeof region === "string" &&
-							!validRegions.includes(region.toUpperCase())
+							!CONTAINER_REGIONS.includes(region.toUpperCase())
 						) {
 							diagnostics.errors.push(
-								`${field}.constraints.regions contains invalid region "${region}". Valid regions are: ${validRegions.join(", ")}`
+								`${field}.constraints.regions contains invalid region "${region}". Valid regions are: ${CONTAINER_REGIONS.join(", ")}`
 							);
 						}
 					}

@@ -4,6 +4,7 @@ import type {
 	CustomDomainRoute,
 	ContainerApp,
 	ContainerEngine,
+	ContainerInstanceGroupConfig,
 	Exports,
 	DurableObjectMigration,
 	Observability,
@@ -558,7 +559,7 @@ export interface StartDevWorkerInput {
 	defaultBindings?: Record<string, Extract<Binding, { type: "plain_text" }>>;
 	migrations?: DurableObjectMigration[];
 	exports?: Exports;
-	containers?: ContainerApp[];
+	containers?: (ContainerApp | ContainerInstanceGroupConfig)[];
 	/** The triggers which will cause the worker's exported default handlers to be called. */
 	triggers?: Trigger[];
 

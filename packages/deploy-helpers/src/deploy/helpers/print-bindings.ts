@@ -14,6 +14,7 @@ import type {
 	CfSendEmailBindings,
 	CfTailConsumer,
 	ContainerApp,
+	ContainerInstanceGroupConfig,
 } from "@cloudflare/workers-utils";
 import type { WorkerRegistry } from "miniflare";
 
@@ -42,7 +43,7 @@ export function printBindings(
 	bindings: StartDevWorkerInput["bindings"],
 	tailConsumers: CfTailConsumer[] = [],
 	streamingTailConsumers: CfTailConsumer[] = [],
-	containers: ContainerApp[] = [],
+	containers: (ContainerApp | ContainerInstanceGroupConfig)[] = [],
 	context: PrintContext = {}
 ) {
 	let hasConnectionStatus = false;
@@ -946,14 +947,17 @@ export function printBindings(
 		);
 	}
 
-	if (containers.length > 0 && !context.provisioning) {
+	const applicationContainers = containers.filter(
+		(container): container is ContainerApp => container.type === undefined
+	);
+	if (applicationContainers.length > 0 && !context.provisioning) {
 		let containersTitle = "The following containers are available:";
 		if (context.name && isMultiWorker) {
 			containersTitle = `The following containers are available from ${chalk.blue(context.name)}:`;
 		}
 
 		log(
-			`${containersTitle}\n${containers
+			`${containersTitle}\n${applicationContainers
 				.map((c) => `- ${c.name} (${c.image})`)
 				.join("\n")}`
 		);

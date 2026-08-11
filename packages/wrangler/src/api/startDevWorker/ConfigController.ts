@@ -138,7 +138,8 @@ async function resolveDevConfig(
 	const initialIpListenCheck = initialIp === "*" ? "0.0.0.0" : initialIp;
 
 	const useContainers =
-		config.dev.enable_containers && config.containers?.length;
+		config.dev.enable_containers &&
+		config.containers?.some((container) => container.type === undefined);
 
 	return {
 		auth,

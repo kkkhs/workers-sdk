@@ -97,11 +97,28 @@ type UnsafeBinding = {
 	[key: string]: unknown;
 };
 
+export type ContainerRegion =
+	| "ENAM"
+	| "WNAM"
+	| "EEUR"
+	| "WEUR"
+	| "APAC"
+	| "SAM"
+	| "ME"
+	| "OC"
+	| "AFR";
+
 /**
  * Configuration for a container application
  */
 export type ContainerApp = {
 	// TODO: fill out the entire type
+
+	/**
+	 * Missing `type` selects the application-backed container model.
+	 * @hidden
+	 */
+	type?: undefined;
 
 	/**
 	 * Name of the application
@@ -246,17 +263,7 @@ export type ContainerApp = {
 		/**
 		 * Limit container placement to specific geographic regions.
 		 */
-		regions?: (
-			| "ENAM"
-			| "WNAM"
-			| "EEUR"
-			| "WEUR"
-			| "APAC"
-			| "SAM"
-			| "ME"
-			| "OC"
-			| "AFR"
-		)[];
+		regions?: ContainerRegion[];
 		/**
 		 * Restrict containers to compliance boundaries.
 		 */
@@ -335,6 +342,43 @@ export type ContainerApp = {
 	 * @hidden
 	 */
 	unsafe?: Record<string, unknown>;
+};
+
+/**
+ * Namespace-backed Container Instance Group configuration.
+ */
+export type ContainerInstanceGroupConfig = {
+	/**
+	 * Selects the namespace-backed Container Instance Group model.
+	 */
+	type: "instance";
+
+	/**
+	 * Name of the Container Instance Group.
+	 * @optional Defaults to `worker_name-class_name` if not specified.
+	 */
+	name?: string;
+
+	/**
+	 * The class name of the Container-enabled Durable Object namespace.
+	 */
+	class_name: string;
+
+	/**
+	 * Scheduling constraints for instances in the namespace.
+	 */
+	constraints?: {
+		regions?: ContainerRegion[];
+		jurisdiction?: "eu" | "fedramp";
+	};
+
+	/**
+	 * SSH policy for instances in the namespace.
+	 */
+	ssh?: {
+		enabled?: boolean;
+		authorized_keys?: { name?: string; public_key: string }[];
+	};
 };
 
 /**
@@ -948,7 +992,7 @@ export interface EnvironmentNonInheritable {
 	 * @default []
 	 * @nonInheritable
 	 */
-	containers?: ContainerApp[];
+	containers?: (ContainerApp | ContainerInstanceGroupConfig)[];
 
 	/**
 	 * These specify any Workers KV Namespaces you want to

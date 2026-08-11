@@ -3722,6 +3722,148 @@ describe("normalizeAndValidateConfig()", () => {
 				}
 			});
 
+			it("should accept a namespace-backed container instance group", ({
+				expect,
+			}) => {
+				const { diagnostics, config } = normalizeAndValidateConfig(
+					{
+						name: "test-worker-name",
+						containers: [
+							{
+								type: "instance",
+								class_name: "Sandbox",
+								constraints: {
+									jurisdiction: "eu",
+									regions: ["WEUR"],
+								},
+								ssh: {
+									enabled: true,
+									authorized_keys: [
+										{
+											name: "developer",
+											public_key: "ssh-ed25519 AAAA",
+										},
+									],
+								},
+							},
+						],
+					} as unknown as RawConfig,
+					undefined,
+					undefined,
+					{ env: undefined }
+				);
+
+				expect(diagnostics.hasWarnings()).toBe(false);
+				expect(diagnostics.hasErrors()).toBe(false);
+				expect(config.containers).toEqual([
+					{
+						type: "instance",
+						class_name: "Sandbox",
+						name: "test-worker-name-sandbox",
+						constraints: {
+							jurisdiction: "eu",
+							regions: ["WEUR"],
+						},
+						ssh: {
+							enabled: true,
+							authorized_keys: [
+								{
+									name: "developer",
+									public_key: "ssh-ed25519 AAAA",
+								},
+							],
+						},
+					},
+				]);
+			});
+
+			it("should reject unsupported explicit container types", ({ expect }) => {
+				const { diagnostics } = normalizeAndValidateConfig(
+					{
+						name: "test-worker",
+						containers: [
+							{
+								type: "app",
+								class_name: "Sandbox",
+								image: "registry.cloudflare.com/test:latest",
+							},
+						],
+					} as unknown as RawConfig,
+					undefined,
+					undefined,
+					{ env: undefined }
+				);
+
+				expect(diagnostics.renderErrors()).toContain(
+					'Unsupported containers[].type: "app". Only "instance" is supported when "type" is set.'
+				);
+			});
+
+			it("should reject application-only fields on container instance groups", ({
+				expect,
+			}) => {
+				const { diagnostics } = normalizeAndValidateConfig(
+					{
+						name: "test-worker",
+						containers: [
+							{
+								type: "instance",
+								class_name: "Sandbox",
+								image: "registry.cloudflare.com/test:latest",
+								max_instances: 10,
+								constraints: {
+									tiers: [1],
+								},
+								ssh: {
+									port: 22,
+								},
+							},
+						],
+					} as unknown as RawConfig,
+					undefined,
+					undefined,
+					{ env: undefined }
+				);
+
+				const errors = diagnostics.renderErrors();
+				expect(errors).toContain(
+					'containers[0] has fields that are not supported for type "instance": "image", "max_instances"'
+				);
+				expect(errors).toContain(
+					'containers[0].constraints has unsupported fields: "tiers"'
+				);
+				expect(errors).toContain(
+					'containers[0].ssh has unsupported fields: "port"'
+				);
+			});
+
+			it("should reject duplicate classes across application and instance entries", ({
+				expect,
+			}) => {
+				const { diagnostics } = normalizeAndValidateConfig(
+					{
+						name: "test-worker",
+						containers: [
+							{
+								class_name: "Sandbox",
+								image: "registry.cloudflare.com/test:latest",
+							},
+							{
+								type: "instance",
+								class_name: "Sandbox",
+							},
+						],
+					} as unknown as RawConfig,
+					undefined,
+					undefined,
+					{ env: undefined }
+				);
+
+				expect(diagnostics.renderErrors()).toContain(
+					'"containers.class_name" must be unique; "Sandbox" is configured more than once.'
+				);
+			});
+
 			it("should provide a name in a named environment that inherits the top level worker name", ({
 				expect,
 			}) => {

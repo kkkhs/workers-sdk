@@ -128,6 +128,12 @@ export type DeployCallbacks = {
 				args: { versionId: string; accountId: string; scriptName: string }
 		  ) => Promise<void>)
 		| undefined;
+	deployContainerInstanceGroups:
+		| ((
+				config: Config,
+				args: { versionId: string; accountId: string; scriptName: string }
+		  ) => Promise<void>)
+		| undefined;
 	analyseBundle:
 		| ((workerBundle: string | FormData) => Promise<Record<string, unknown>>)
 		| undefined;
@@ -733,6 +739,18 @@ export default async function deploy(
 	) {
 		assert(versionId && accountId);
 		await callbacks.deployContainers(config, normalisedContainerConfig, {
+			versionId,
+			accountId,
+			scriptName,
+		});
+	}
+	if (
+		config.containers?.some((container) => container.type === "instance") &&
+		props.containersRollout !== "none" &&
+		callbacks.deployContainerInstanceGroups
+	) {
+		assert(versionId && accountId);
+		await callbacks.deployContainerInstanceGroups(config, {
 			versionId,
 			accountId,
 			scriptName,
